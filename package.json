@@ -1,0 +1,29 @@
+{
+  "name": "polaris-insights-bot",
+  "version": "2.0.0",
+  "description": "Sends Polaris insights to twitter and telegram",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jasbanza/polaris-insights-bot.git"
+  },
+  "author": "jasbanza",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/jasbanza/polaris-insights-bot/issues"
+  },
+  "homepage": "https://github.com/jasbanza/polaris-insights-bot#readme",
+  "dependencies": {
+    "canvas": "^3.1.2",
+    "dotenv": "^16.0.0",
+    "form-data": "^4.0.4",
+    "js-console-log-colors": "^1.1.0",
+    "node-fetch": "^2.7.0",
+    "twitter-api-v2": "^1.27.0"
+  }
+}
