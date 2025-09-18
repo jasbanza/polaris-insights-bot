@@ -51,7 +51,7 @@ export const config = {
     insights: {
         limit: parseInt(process.env.INSIGHTS_LIMIT) || 7,
         minimumAgeMinutes: parseInt(process.env.MINIMUM_AGE_MINUTES) || 10,
-        defaultBackgroundColor: process.env.DEFAULT_BACKGROUND_COLOR || 'gray-900',
+        defaultBackgroundColor: process.env.DEFAULT_BACKGROUND_COLOR || 'gray-800',
         baseUrl: process.env.POLARIS_INSIGHTS_URL || 'https://beta.polaris.app/insights/',
         polarisLogoPath: path.join(__dirname, '..', 'assets', 'circle.png'),
         scaleForegroundImage: parseFloat(process.env.SCALE_FOREGROUND_IMAGE) || 0.8,
