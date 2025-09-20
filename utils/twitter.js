@@ -222,12 +222,12 @@ export async function postTweetWithMedia(text, imageBuffer) {
 export async function sendInsightToTwitter(insight, imageBuffer, config) {
     try {
         // Format the tweet text
-        const insightUrl = `${config.insightsUrl}${insight.id}`;
+        const insightUrl = `${config.insights.baseUrl}${insight.id}`;
         const insightText = formatInsightForTwitter(insight, insightUrl);
         
         let response;
         
-        if (config.postImages && imageBuffer) {
+        if (config.twitter.postImages && imageBuffer) {
             console.log(`Sending tweet with image for insight ${insight.id}`);
             response = await postTweetWithMedia(insightText, imageBuffer);
         } else {
@@ -249,7 +249,7 @@ export async function sendInsightToTwitter(insight, imageBuffer, config) {
             timestamp: new Date().toISOString()
         };
         
-        addProcessedInsight(insight.id, platformResponse);
+        addProcessedInsight(insight.id, {}, platformResponse);
         
         return tweetUrl;
         

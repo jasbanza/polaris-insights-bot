@@ -67,9 +67,10 @@ export function addProcessedInsight(insightId, metadata = {}, platformResponse =
         
         // Add platform-specific response data
         if (platformResponse) {
-            if (config.platform.mode === 'twitter' && platformResponse.tweetUrl) {
-                insightData.tweetUrl = platformResponse.tweetUrl;
-                insightData.tweetId = platformResponse.data?.id;
+            if (config.platform.mode === 'twitter') {
+                insightData.url = platformResponse.url;
+                insightData.tweetId = platformResponse.id;
+                insightData.timestamp = platformResponse.timestamp;
             } else if (config.platform.mode === 'telegram' && platformResponse.result) {
                 insightData.messageId = platformResponse.result.message_id;
                 insightData.chatId = platformResponse.result.chat.id;

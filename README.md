@@ -2,7 +2,8 @@
 
 A multi-platform bot that fetches insights from Polaris API and posts them to **Telegram** or **Twitter** with custom image generation and overlays.
 
-![Polaris Insights stage](https://cronitor.io/badges/lt1C7T/production/fK1lLUWSJYSIezbKx2Pw2PkNx6Y.svg)
+![Polaris Insights Telegram](https://cronitor.io/badges/lt1C7T/production/fK1lLUWSJYSIezbKx2Pw2PkNx6Y.svg)
+![Polaris Insights Twitter](https://cronitor.io/badges/j18pTN/production/JiFoh-bXonP5pqtyoNWJNHB_Ooc.svg)
 
 ## 🚀 Platform Support
 
