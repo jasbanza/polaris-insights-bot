@@ -141,6 +141,19 @@ async function processNewPublishedInsights() {
                 if (error.rateLimit) {
                     out.warn(`Rate limit info: ${JSON.stringify(error.rateLimit)}`);
                 }
+                
+                // Ensure rate limit caching completes before exit
+                try {
+                    // Import and cache the rate limit error if not already done
+                    const { cacheRateLimitError } = await import('./utils/rate-limit-cache.js');
+                    if (error.rateLimit) {
+                        cacheRateLimitError(error);
+                        out.info('💾 Rate limit cached before exit');
+                    }
+                } catch (cacheError) {
+                    out.warn(`Failed to cache rate limit: ${cacheError.message}`);
+                }
+                
                 process.exit(1);
             }
             
