@@ -10,7 +10,7 @@ import { ConsoleLogColors } from "js-console-log-colors";
 import { config, getChatId, getTwitterCredentials } from './utils/config.js';
 import { readCache, writeCache, isInsightProcessed, addProcessedInsight } from './utils/cache.js';
 import { sendTextMessage, sendPhotoMessage } from './utils/telegram.js';
-import { sendInsightToTwitter } from './utils/twitter.js';
+import { sendInsightToTwitter, checkTwitterRateLimit } from './utils/twitter.js';
 import { getImageForInsight } from './utils/image.js';
 
 const out = new ConsoleLogColors();
@@ -83,6 +83,23 @@ async function processNewPublishedInsights() {
     const eligibleInsights = filterEligibleInsights(insights.reverse());
     out.info(`${eligibleInsights.length} of ${insights.length} insights eligible for processing`);
 
+    // Check Twitter rate limits before processing if using Twitter platform
+    if (config.platform.mode === 'twitter') {
+        out.info('Checking Twitter rate limits before processing...');
+        const rateLimitCheck = await checkTwitterRateLimit();
+        
+        if (!rateLimitCheck.canPost) {
+            out.error(`🛑 TWITTER RATE LIMIT EXCEEDED - ${rateLimitCheck.message}`);
+            out.warn('Stopping execution to avoid API violations');
+            process.exit(1);
+        }
+        
+        out.success(`✅ Twitter rate limits OK - proceeding with ${eligibleInsights.length} insights`);
+        if (rateLimitCheck.tweetLimits) {
+            out.info(`Tweet limit: ${rateLimitCheck.tweetLimits.remaining}/${rateLimitCheck.tweetLimits.limit} remaining`);
+        }
+    }
+
     for (const insight of eligibleInsights) {
         try {
             if (isInsightProcessed(insight.id)) {
@@ -117,6 +134,16 @@ async function processNewPublishedInsights() {
             await new Promise(resolve => setTimeout(resolve, 1000));
 
         } catch (error) {
+            // Check for rate limit errors (HTTP 429) and exit immediately
+            if (error.message.includes('429') || error.code === 429 || (error.error && error.code === 429)) {
+                out.error(`🛑 RATE LIMIT HIT (429) - Stopping execution immediately to avoid further API violations`);
+                out.warn(`Rate limit details: ${error.message}`);
+                if (error.rateLimit) {
+                    out.warn(`Rate limit info: ${JSON.stringify(error.rateLimit)}`);
+                }
+                process.exit(1);
+            }
+            
             out.error(`Error processing insight ${insight.id}: ${error.message}`);
             continue;
         }

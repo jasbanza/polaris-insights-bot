@@ -6,6 +6,7 @@
 import { TwitterApi } from 'twitter-api-v2';
 import { getTwitterCredentials } from './config.js';
 import { addProcessedInsight } from './cache.js';
+import { readRateLimitCache, checkCachedRateLimit, cacheRateLimitError } from './rate-limit-cache.js';
 
 /**
  * Creates and configures Twitter API client
@@ -24,6 +25,144 @@ function createTwitterClient() {
         accessToken: credentials.accessToken,
         accessSecret: credentials.accessTokenSecret,
     });
+}
+
+/**
+ * Checks Twitter API rate limits with intelligent caching
+ * Uses cached rate limit data to avoid repeated API calls when rate limited
+ */
+export async function checkTwitterRateLimit() {
+    try {
+        console.log('🔍 Checking Twitter rate limit status...');
+        
+        // First check if we have cached rate limit data
+        const cachedRateLimit = readRateLimitCache();
+        if (cachedRateLimit) {
+            console.log('📋 Found cached rate limit data');
+            const cacheStatus = checkCachedRateLimit(cachedRateLimit);
+            
+            if (cacheStatus.isRateLimited) {
+                console.error(`🛑 CACHED RATE LIMIT ACTIVE - ${cacheStatus.message}`);
+                return {
+                    canPost: false,
+                    message: cacheStatus.message,
+                    cached: true,
+                    resetTime: cacheStatus.resetTime,
+                    timeRemaining: cacheStatus.timeRemaining
+                };
+            } else if (cacheStatus.expired) {
+                console.log('✅ Cached rate limit has expired - proceeding with fresh check');
+            }
+        }
+        
+        // Proceed with authentication and basic API check
+        const client = createTwitterClient();
+        console.log('🔐 Verifying Twitter authentication...');
+        
+        const userResponse = await client.v2.me();
+        const username = userResponse.data.username;
+        console.log(`✅ Authenticated as @${username}`);
+        
+        // Try to get app-level rate limit status
+        try {
+            const rateLimitResponse = await client.v1.get('application/rate_limit_status.json');
+            console.log('📊 Retrieved app-level rate limit status');
+            
+            // Check posting endpoint limits
+            const statusResources = rateLimitResponse.resources?.statuses;
+            if (statusResources) {
+                const updateLimit = statusResources['/statuses/update'];
+                if (updateLimit && updateLimit.remaining === 0) {
+                    const resetTime = new Date(updateLimit.reset * 1000);
+                    const timeUntilReset = updateLimit.reset - Math.floor(Date.now() / 1000);
+                    const hours = Math.floor(timeUntilReset / 3600);
+                    const minutes = Math.floor((timeUntilReset % 3600) / 60);
+                    
+                    console.error(`🛑 App-level posting rate limit exhausted`);
+                    console.error(`⏰ Resets in: ${hours}h ${minutes}m at ${resetTime.toLocaleString()}`);
+                    
+                    // Cache this rate limit
+                    const rateLimitData = {
+                        error: true,
+                        limitType: 'app-posting',
+                        resetTimestamp: updateLimit.reset,
+                        details: {
+                            remaining: updateLimit.remaining,
+                            limit: updateLimit.limit,
+                            type: 'App-level posting limit'
+                        }
+                    };
+                    
+                    cacheRateLimitError({ rateLimit: { reset: updateLimit.reset, remaining: 0, limit: updateLimit.limit }, message: 'App posting limit exceeded' });
+                    
+                    return {
+                        canPost: false,
+                        message: `App posting limit exhausted. Resets in ${hours}h ${minutes}m`,
+                        resetTime: resetTime.toISOString(),
+                        rateLimitType: 'app-posting'
+                    };
+                }
+                
+                if (updateLimit) {
+                    console.log(`📝 App posting limit: ${updateLimit.remaining}/${updateLimit.limit} remaining`);
+                }
+            }
+        } catch (rateLimitCheckError) {
+            console.warn('⚠️ Could not check app-level rate limits:', rateLimitCheckError.message);
+        }
+        
+        console.log('✅ Pre-flight checks passed');
+        console.log('ℹ️ User daily limits (17 tweets/day) will be checked during first posting attempt');
+        
+        return {
+            canPost: true,
+            message: `Authentication and app-level checks OK for @${username}`,
+            username: username,
+            note: 'User daily limits will be detected on first post attempt'
+        };
+        
+    } catch (error) {
+        console.error('❌ Twitter rate limit check failed:', error.message);
+        
+        if (error.code === 401) {
+            return {
+                canPost: false,
+                message: 'Authentication failed - check Twitter API credentials',
+                error: error.message
+            };
+        }
+        
+        if (error.code === 429) {
+            console.error('🛑 Rate limit detected during pre-flight check');
+            
+            // Cache this rate limit error
+            const cachedData = cacheRateLimitError(error);
+            if (cachedData) {
+                const timeUntilReset = cachedData.resetTimestamp - Math.floor(Date.now() / 1000);
+                const hours = Math.floor(timeUntilReset / 3600);
+                const minutes = Math.floor((timeUntilReset % 3600) / 60);
+                
+                return {
+                    canPost: false,
+                    message: `Rate limit during authentication. Resets in ${hours}h ${minutes}m`,
+                    cached: true,
+                    resetTime: new Date(cachedData.resetTimestamp * 1000).toISOString()
+                };
+            }
+            
+            return {
+                canPost: false,
+                message: 'Rate limit detected during authentication check',
+                error: error.message
+            };
+        }
+        
+        return {
+            canPost: true,
+            message: `Pre-flight check failed: ${error.message} - proceeding with caution`,
+            error: error.message
+        };
+    }
 }
 
 /**
@@ -116,6 +255,15 @@ export async function sendInsightToTwitter(insight, imageBuffer, config) {
         
     } catch (error) {
         console.error(`❌ Failed to post insight ${insight.id} to Twitter:`, error.message);
+        
+        // Check for rate limit and cache it
+        if (error.code === 429) {
+            console.error('🛑 Rate limit hit during insight posting');
+            cacheRateLimitError(error);
+            // Re-throw with preserved error object for upstream handling
+            throw error;
+        }
+        
         throw new Error(`Twitter API error: ${error.message}`);
     }
 }
@@ -139,8 +287,6 @@ export function formatInsightForTwitter(insight, insightUrl) {
         text = text.substring(0, availableLength - 3) + '...';
     }
     
-    // Add zero-width character to prevent link preview (custom images already prevent this)
-    const urlWithoutPreview = insightUrl.replace('://', '://\u200B');
-    
-    return `${text} ${urlWithoutPreview}`;
+    // Return clean URL without zero-width characters (custom images prevent link preview anyway)
+    return `${text} ${insightUrl}`;
 }
