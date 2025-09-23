@@ -30,16 +30,40 @@ export const config = {
     },
     
     twitter: {
+        // Primary account (production)
         apiKey: process.env.TWITTER_API_KEY,
         apiSecret: process.env.TWITTER_API_SECRET,
         accessToken: process.env.TWITTER_ACCESS_TOKEN,
         accessTokenSecret: process.env.TWITTER_ACCESS_TOKEN_SECRET,
-        testApiKey: process.env.TWITTER_TEST_API_KEY,
-        testApiSecret: process.env.TWITTER_TEST_API_SECRET,
-        testAccessToken: process.env.TWITTER_TEST_ACCESS_TOKEN,
-        testAccessTokenSecret: process.env.TWITTER_TEST_ACCESS_TOKEN_SECRET,
+        
+        // Test accounts (fallback support)
+        testAccounts: [
+            {
+                name: 'primary-test',
+                apiKey: process.env.TWITTER_TEST_API_KEY,
+                apiSecret: process.env.TWITTER_TEST_API_SECRET,
+                accessToken: process.env.TWITTER_TEST_ACCESS_TOKEN,
+                accessTokenSecret: process.env.TWITTER_TEST_ACCESS_TOKEN_SECRET
+            },
+            {
+                name: 'fallback-test',
+                apiKey: process.env.TWITTER_TEST_2_API_KEY,
+                apiSecret: process.env.TWITTER_TEST_2_API_SECRET,
+                accessToken: process.env.TWITTER_TEST_2_ACCESS_TOKEN,
+                accessTokenSecret: process.env.TWITTER_TEST_2_ACCESS_TOKEN_SECRET
+            },
+            {
+                name: 'backup-test',
+                apiKey: process.env.TWITTER_TEST_3_API_KEY,
+                apiSecret: process.env.TWITTER_TEST_3_API_SECRET,
+                accessToken: process.env.TWITTER_TEST_3_ACCESS_TOKEN,
+                accessTokenSecret: process.env.TWITTER_TEST_3_ACCESS_TOKEN_SECRET
+            }
+        ].filter(account => account.apiKey && account.apiSecret && account.accessToken && account.accessTokenSecret),
+        
         testMode: isTestMode,
-        postImages: process.env.TWITTER_POST_IMAGES === 'true'
+        postImages: process.env.TWITTER_POST_IMAGES === 'true',
+        enableFallback: process.env.TWITTER_ENABLE_FALLBACK === 'true'
     },
     
     cache: {
@@ -75,21 +99,54 @@ export function getChatId() {
     }
 }
 
-export function getTwitterCredentials() {
+export function getTwitterCredentials(accountIndex = 0) {
     if (config.twitter.testMode) {
+        // In test mode, use test accounts with fallback support
+        const testAccounts = config.twitter.testAccounts;
+        
+        if (testAccounts.length === 0) {
+            // Fallback to legacy test credentials if no test accounts configured
+            return {
+                apiKey: config.twitter.apiKey,
+                apiSecret: config.twitter.apiSecret,
+                accessToken: config.twitter.accessToken,
+                accessTokenSecret: config.twitter.accessTokenSecret,
+                accountName: 'legacy-test'
+            };
+        }
+        
+        // Use specified account index, or first available account
+        const accountToUse = testAccounts[Math.min(accountIndex, testAccounts.length - 1)];
         return {
-            apiKey: config.twitter.testApiKey || config.twitter.apiKey,
-            apiSecret: config.twitter.testApiSecret || config.twitter.apiSecret,
-            accessToken: config.twitter.testAccessToken || config.twitter.accessToken,
-            accessTokenSecret: config.twitter.testAccessTokenSecret || config.twitter.accessTokenSecret
+            apiKey: accountToUse.apiKey,
+            apiSecret: accountToUse.apiSecret,
+            accessToken: accountToUse.accessToken,
+            accessTokenSecret: accountToUse.accessTokenSecret,
+            accountName: accountToUse.name
         };
     } else {
+        // Production mode - always use primary account
         return {
             apiKey: config.twitter.apiKey,
             apiSecret: config.twitter.apiSecret,
             accessToken: config.twitter.accessToken,
-            accessTokenSecret: config.twitter.accessTokenSecret
+            accessTokenSecret: config.twitter.accessTokenSecret,
+            accountName: 'production'
         };
+    }
+}
+
+export function getAvailableTwitterAccounts() {
+    if (config.twitter.testMode) {
+        return config.twitter.testAccounts;
+    } else {
+        return [{
+            name: 'production',
+            apiKey: config.twitter.apiKey,
+            apiSecret: config.twitter.apiSecret,
+            accessToken: config.twitter.accessToken,
+            accessTokenSecret: config.twitter.accessTokenSecret
+        }];
     }
 }
 

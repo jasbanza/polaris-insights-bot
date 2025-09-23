@@ -114,10 +114,16 @@ async function processNewPublishedInsights() {
             out.info(`Processing insight: ${insight.id}`);
             
             const platformResponse = await sendMessage(insight);
+            
             if (config.platform.mode === 'telegram' && !platformResponse?.ok) {
                 throw new Error(`Message failed: ${platformResponse?.description || 'Unknown error'}`);
-            } else if (config.platform.mode === 'twitter' && !platformResponse?.data) {
-                throw new Error(`Tweet failed: ${platformResponse?.error || 'Unknown error'}`);
+            } else if (config.platform.mode === 'twitter') {
+                // Twitter returns a string (tweet URL) on success, not an object with data property
+                if (typeof platformResponse === 'string' && platformResponse.includes('twitter.com')) {
+                    out.success(`✅ Tweet posted successfully: ${platformResponse}`);
+                } else if (!platformResponse?.data) {
+                    throw new Error(`Tweet failed: ${platformResponse?.error || 'Unknown error'}`);
+                }
             }
 
             out.success(`Message sent for insight ${insight.id}`);

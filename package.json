@@ -6,7 +6,12 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
-    "dev": "node index.js"
+    "dev": "node index.js",
+    "preseed": "node utils/preseed-cache.js preseed",
+    "preseed:dry-run": "node utils/preseed-cache.js preseed --dry-run",
+    "preseed:large": "node utils/preseed-cache.js preseed --limit=100",
+    "cache:stats": "node utils/preseed-cache.js stats",
+    "deploy:prep": "npm run preseed && npm run cache:stats"
   },
   "repository": {
     "type": "git",

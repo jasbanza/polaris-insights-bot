@@ -4,20 +4,55 @@
  */
 
 import { TwitterApi } from 'twitter-api-v2';
-import { getTwitterCredentials } from './config.js';
+import { getTwitterCredentials, getAvailableTwitterAccounts, config } from './config.js';
 import { addProcessedInsight } from './cache.js';
 import { readRateLimitCache, checkCachedRateLimit, cacheRateLimitError } from './rate-limit-cache.js';
 
+// Track current account index for fallback
+let currentAccountIndex = 0;
+
+/**
+ * Attempts to switch to next available Twitter account
+ * @returns {boolean} True if fallback account is available, false if no more accounts
+ */
+function switchToFallbackAccount() {
+    const availableAccounts = getAvailableTwitterAccounts();
+    const nextIndex = currentAccountIndex + 1;
+    
+    if (nextIndex < availableAccounts.length) {
+        currentAccountIndex = nextIndex;
+        console.log(`🔄 Switching to fallback account: ${availableAccounts[currentAccountIndex].name}`);
+        return true;
+    }
+    
+    console.log('❌ No more fallback accounts available');
+    return false;
+}
+
+/**
+ * Resets account index to primary account
+ */
+function resetToFrimaryAccount() {
+    currentAccountIndex = 0;
+    const availableAccounts = getAvailableTwitterAccounts();
+    if (availableAccounts.length > 0) {
+        console.log(`🔄 Reset to primary account: ${availableAccounts[0].name}`);
+    }
+}
+
 /**
  * Creates and configures Twitter API client
+ * @param {number} accountIndex - Index of account to use (for fallback)
  * @returns {TwitterApi} Configured Twitter API client
  */
-function createTwitterClient() {
-    const credentials = getTwitterCredentials();
+function createTwitterClient(accountIndex = currentAccountIndex) {
+    const credentials = getTwitterCredentials(accountIndex);
     
     if (!credentials.apiKey || !credentials.apiSecret || !credentials.accessToken || !credentials.accessTokenSecret) {
-        throw new Error('Twitter API credentials not configured');
+        throw new Error(`Twitter API credentials not configured for account: ${credentials.accountName || 'unknown'}`);
     }
+
+    console.log(`🔐 Using Twitter account: ${credentials.accountName} (index: ${accountIndex})`);
 
     return new TwitterApi({
         appKey: credentials.apiKey,
@@ -213,59 +248,90 @@ export async function postTweetWithMedia(text, imageBuffer) {
 }
 
 /**
- * Sends an insight to Twitter (with or without image based on configuration)
+ * Sends an insight to Twitter with automatic fallback account support
  * @param {Object} insight - The insight object containing title, summary, and image data
  * @param {Buffer|null} imageBuffer - The image buffer (if images are enabled)
  * @param {Object} config - Configuration object
  * @returns {Promise<string>} Tweet URL
  */
 export async function sendInsightToTwitter(insight, imageBuffer, config) {
-    try {
-        // Format the tweet text
-        const insightUrl = `${config.insights.baseUrl}${insight.id}`;
-        const insightText = formatInsightForTwitter(insight, insightUrl);
-        
-        let response;
-        
-        if (config.twitter.postImages && imageBuffer) {
-            console.log(`Sending tweet with image for insight ${insight.id}`);
-            response = await postTweetWithMedia(insightText, imageBuffer);
-        } else {
-            console.log(`Sending text-only tweet for insight ${insight.id}`);
-            response = await postTweet(insightText);
-        }
-        
-        // Extract tweet URL from response
-        const tweetId = response.data.id;
-        const tweetUrl = `https://twitter.com/i/web/status/${tweetId}`;
-        
-        console.log(`✅ Posted to Twitter: ${tweetUrl}`);
-        
-        // Add to cache with platform information
-        const platformResponse = {
-            platform: 'twitter',
-            url: tweetUrl,
-            id: tweetId,
-            timestamp: new Date().toISOString()
-        };
-        
-        addProcessedInsight(insight.id, {}, platformResponse);
-        
-        return tweetUrl;
-        
-    } catch (error) {
-        console.error(`❌ Failed to post insight ${insight.id} to Twitter:`, error.message);
-        
-        // Check for rate limit and cache it
-        if (error.code === 429) {
-            console.error('🛑 Rate limit hit during insight posting');
-            cacheRateLimitError(error);
-            // Re-throw with preserved error object for upstream handling
+    const maxRetries = config.twitter.enableFallback ? getAvailableTwitterAccounts().length : 1;
+    let lastError = null;
+    
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+            console.log(`📝 Attempt ${attempt + 1}/${maxRetries} to post insight ${insight.id}`);
+            
+            // Format the tweet text
+            const insightUrl = `${config.insights.baseUrl}${insight.id}`;
+            const insightText = formatInsightForTwitter(insight, insightUrl);
+            
+            let response;
+            
+            if (config.twitter.postImages && imageBuffer) {
+                console.log(`Sending tweet with image for insight ${insight.id}`);
+                response = await postTweetWithMedia(insightText, imageBuffer);
+            } else {
+                console.log(`Sending text-only tweet for insight ${insight.id}`);
+                response = await postTweet(insightText);
+            }
+            
+            // Extract tweet URL from response
+            const tweetId = response.data.id;
+            const tweetUrl = `https://twitter.com/i/web/status/${tweetId}`;
+            
+            const credentials = getTwitterCredentials(currentAccountIndex);
+            console.log(`✅ Posted to Twitter (${credentials.accountName}): ${tweetUrl}`);
+            
+            // Add to cache with platform information
+            const platformResponse = {
+                platform: 'twitter',
+                url: tweetUrl,
+                id: tweetId,
+                timestamp: new Date().toISOString(),
+                accountUsed: credentials.accountName
+            };
+            
+            addProcessedInsight(insight.id, {}, platformResponse);
+            
+            // Reset to primary account after successful post
+            if (attempt > 0) {
+                resetToFrimaryAccount();
+            }
+            
+            return tweetUrl;
+            
+        } catch (error) {
+            console.error(`❌ Failed to post insight ${insight.id} to Twitter (attempt ${attempt + 1}):`, error.message);
+            lastError = error;
+            
+            // Check for rate limit and cache it
+            if (error.code === 429) {
+                console.error(`🛑 Rate limit hit on account: ${getTwitterCredentials(currentAccountIndex).accountName}`);
+                cacheRateLimitError(error);
+                
+                // Try fallback account if enabled and available
+                if (config.twitter.enableFallback && attempt < maxRetries - 1) {
+                    if (switchToFallbackAccount()) {
+                        console.log(`🔄 Retrying with fallback account...`);
+                        continue;
+                    }
+                }
+                
+                // If no fallback available or fallback disabled, re-throw error
+                throw error;
+            }
+            
+            // For non-rate-limit errors, don't retry with fallback
+            if (attempt === 0 && config.twitter.enableFallback) {
+                console.warn(`⚠️ Non-rate-limit error on primary account, not trying fallback for: ${error.message}`);
+            }
             throw error;
         }
-        
-        throw new Error(`Twitter API error: ${error.message}`);
     }
+    
+    // If we get here, all attempts failed
+    throw new Error(`All Twitter accounts failed to post insight. Last error: ${lastError?.message}`);
 }
 
 /**
