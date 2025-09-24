@@ -102,11 +102,6 @@ async function processNewPublishedInsights() {
 
     for (const insight of eligibleInsights) {
         try {
-            if (isInsightProcessed(insight.id)) {
-                out.info(`Insight ${insight.id} already processed, skipping`);
-                continue;
-            }
-
             if (isInsightTooOld(insight)) {
                 continue;
             }
@@ -174,6 +169,13 @@ function filterEligibleInsights(insights) {
     const minAgeMs = config.insights.minimumAgeMinutes * 60 * 1000;
     
     return insights.filter(insight => {
+        // Check if already processed first
+        if (isInsightProcessed(insight.id)) {
+            out.info(`Insight ${insight.id} already processed, skipping`);
+            return false;
+        }
+        
+        // Check age
         const publishedAt = new Date(insight.publishedAt);
         const ageMs = now.getTime() - publishedAt.getTime();
         const isOldEnough = ageMs >= minAgeMs;
@@ -181,9 +183,10 @@ function filterEligibleInsights(insights) {
         if (!isOldEnough) {
             const ageMinutes = Math.floor(ageMs / (60 * 1000));
             out.info(`Insight ${insight.id} too recent (${ageMinutes}min), skipping`);
+            return false;
         }
         
-        return isOldEnough;
+        return true;
     });
 }
 
